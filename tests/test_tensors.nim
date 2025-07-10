@@ -4,7 +4,7 @@
 # https://opensource.org/licenses/MIT
 
 import unittest
-import tinytensor
+import steadytensor
 import math
 import random
 

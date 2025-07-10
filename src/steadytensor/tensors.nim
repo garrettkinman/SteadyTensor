@@ -87,7 +87,20 @@ proc rand*[T; shape: static TensorShape](min: T = 0.T, max: T = 1.T): Tensor[T, 
     for i in 0..<result.data.len:
         result.data[i] = rand(min..max)
 
-# Example operations
+# Tensor functions
+func flatten*[T; shape: static TensorShape](t: Tensor[T, shape]): StridedVector[T, totalSize(shape)] =
+    ## Creates a flattened view of a tensor as a 1D vector
+    StridedVector[T, totalSize(shape)](
+        data: cast[ptr UncheckedArray[T]](addr t.data[0]),
+        stride: 1
+    )
+
+func copy*[T; shape: static TensorShape](t: Tensor[T, shape]): Tensor[T, shape] =
+    ## Creates a deep copy of a tensor
+    result = initTensor[T, shape]()
+    for i in 0..<t.data.len:
+        result.data[i] = t.data[i]
+
 func map*[T, U; shape: static TensorShape](t: Tensor[T, shape], f: static proc(x: T): U {.noSideEffect.}): Tensor[U, shape] =
     result = initTensor[U, shape]()
     for i in 0..<t.data.len:

@@ -4,7 +4,7 @@
 # https://opensource.org/licenses/MIT
 
 import unittest
-import tinytensor
+import steadytensor
 
 suite "Matrix Multiplication Tests":
     test "2x2 identity matrix multiplication":
