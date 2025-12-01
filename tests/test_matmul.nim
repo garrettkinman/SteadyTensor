@@ -97,6 +97,7 @@ suite "Matrix Multiplication Tests":
         B[0, 0] = 4.0
         
         let result = A * B
+        # let result = matmulDirect(A, B)
         check(abs(result[0, 0] - 12.0) < 1e-10)
 
     test "Matrix multiplication with zeros":

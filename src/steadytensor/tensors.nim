@@ -4,13 +4,26 @@
 # https://opensource.org/licenses/MIT
 
 import random
-import primops
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# CONFIGURATION
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Global Layout Switch
+# Pass -d:colMajor to the compiler to switch to Column-Major (Fortran/MATLAB) layout.
+# Default is Row-Major (C/Numpy) layout.
+# Use ColMajor for Sparse Distributed Representations (SDR) or specific MCU prefetch patterns.
+const ColMajor*: bool = defined(colMajor)
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# CORE TYPES
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 type
     TensorShape*[rank: static int] = array[rank, int]
 
 # Calculate total size at compile time
-func totalSize[rank: static int](shape: static TensorShape[rank]): static int =
+func totalSize*[rank: static int](shape: static TensorShape[rank]): static int =
     var size = 1
     for dim in shape:
         size *= dim
@@ -18,17 +31,99 @@ func totalSize[rank: static int](shape: static TensorShape[rank]): static int =
 
 type
     Tensor*[T; shape: static TensorShape] = object
+        # The backing store is a contiguous static array.
+        # We access this differently depending on ColMajor/RowMajor.
         data*: array[totalSize(shape), T]
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# INDEXING LOGIC
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+func flatIndex*[shape: static TensorShape](indices: varargs[int]): int {.inline.} =
+    var idx = 0
+    var stride = 1
+    when ColMajor:
+        # COLUMN-MAJOR: First dimension changes fastest (Left-to-Right)
+        # Ideal for: Sparse Distributed Representations (SDRs), Spiking Neural Networks (SNNs)
+        for dim in 0 .. shape.high:
+            assert indices[dim] >= 0 and indices[dim] < shape[dim], "Index out of bounds"
+            idx += indices[dim] * stride
+            stride *= shape[dim]
+    else:
+        # ROW-MAJOR: Last dimension changes fastest (Right-to-Left)
+        # Ideal for: Standard Dense Deep Learning, C Interop
+        for dim in countdown(shape.high, 0):
+            assert indices[dim] >= 0 and indices[dim] < shape[dim], "Index out of bounds"
+            idx += indices[dim] * stride
+            stride *= shape[dim]
+    idx
+
+func `[]`*[T; shape: static TensorShape](t: Tensor[T, shape], indices: varargs[int]): T =
+    assert indices.len == shape.len, "Invalid number of indices"
+
+    var flatIndex = 0
+    var stride = 1
+
+    when ColMajor:
+        for dim in 0 .. shape.high:
+            assert indices[dim] >= 0 and indices[dim] < shape[dim], "Index out of bounds"
+            flatIndex += indices[dim] * stride
+            stride *= shape[dim]
+    else:
+        # ROW-MAJOR: Last dimension changes fastest (Right-to-Left)
+        # Ideal for: Standard Dense Deep Learning, C Interop
+        for dim in countdown(shape.high, 0):
+            assert indices[dim] >= 0 and indices[dim] < shape[dim], "Index out of bounds"
+            flatIndex += indices[dim] * stride
+            stride *= shape[dim]
+    
+    result = t.data[flatIndex]
+
+    # result = t.data[flatIndex[shape](indices)]
+
+func `[]=`*[T; shape: static TensorShape](t: var Tensor[T, shape], indices: varargs[int], value: T) {.inline.} =
+    assert indices.len == shape.len, "Invalid number of indices"
+    
+    var flatIndex = 0
+    var stride = 1
+
+    when ColMajor:
+        for dim in 0 .. shape.high:
+            assert indices[dim] >= 0 and indices[dim] < shape[dim], "Index out of bounds"
+            flatIndex += indices[dim] * stride
+            stride *= shape[dim]
+    else:
+        for dim in countdown(shape.high, 0):
+            assert indices[dim] >= 0 and indices[dim] < shape[dim], "Index out of bounds"
+            flatIndex += indices[dim] * stride
+            stride *= shape[dim]
+
+    t.data[flatIndex] = value
+
+    # t.data[flatIndex[shape](indices)] = value
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# HELPERS & INITIALIZATION
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # Helper to get dimensions at compile time
 func dim*[rank: static int](shape: static TensorShape[rank], d: static int): static int =
     const val = shape[d]
     val
 
-func initTensor*[T; shape: static TensorShape](default: T = default(T)): Tensor[T, shape] =
-    result = Tensor[T, shape](data: default(array[totalSize(shape), T]))
-    for i in 0..<result.data.len:
-        result.data[i] = default
+func shape*[T; shape: static TensorShape](t: Tensor[T, shape]): TensorShape[shape.len] =
+    shape
+
+func size*[T; shape: static TensorShape](t: Tensor[T, shape]): int =
+    totalSize(shape)
+
+func initTensor*[T; shape: static TensorShape](defaultVal: T = default(T)): Tensor[T, shape] =
+    # Result is implicitly initialized to zero/default by Nim, 
+    # but we can force set it if a specific default is provided.
+    result = Tensor[T, shape]() 
+    if defaultVal != default(T):
+        for i in 0..<result.data.len:
+            result.data[i] = defaultVal
 
 func initTensor*[T; shape: static TensorShape; N: static int](data: array[N, T]): Tensor[T, shape] =
     static:
@@ -37,46 +132,9 @@ func initTensor*[T; shape: static TensorShape; N: static int](data: array[N, T])
     
     result = Tensor[T, shape](data: data)
 
-func `[]`*[T; shape: static TensorShape](t: Tensor[T, shape], indices: varargs[int]): T =
-    assert indices.len == shape.len, "Invalid number of indices"
-    var flatIndex = 0
-    var stride = 1
-    for dim in countdown(shape.high, 0):
-        assert indices[dim] >= 0 and indices[dim] < shape[dim], "Index out of bounds"
-        flatIndex += indices[dim] * stride
-        if dim > 0:
-            stride *= shape[dim]
-    t.data[flatIndex]
-
-func `[]=`*[T; shape: static TensorShape](t: var Tensor[T, shape], indices: varargs[int], value: T) =
-    assert indices.len == shape.len, "Invalid number of indices"
-    var flatIndex = 0
-    var stride = 1
-    for dim in countdown(shape.high, 0):
-        assert indices[dim] >= 0 and indices[dim] < shape[dim], "Index out of bounds"
-        flatIndex += indices[dim] * stride
-        if dim > 0:
-            stride *= shape[dim]
-    t.data[flatIndex] = value
-
-func shape*[T; shape: static TensorShape](t: Tensor[T, shape]): TensorShape[shape.len] =
-    shape
-
-func size*[T; shape: static TensorShape](t: Tensor[T, shape]): int =
-    totalSize(shape)
-
-func `$`*[T; shape: static TensorShape](t: Tensor[T, shape]): string =
-    result = "Tensor["
-    result.add $shape
-    result.add "]("
-    for i, val in t.data:
-        if i > 0: result.add ", "
-        result.add $val
-    result.add ")"
-
 # Initialization functions
 func zeros*[T; shape: static TensorShape](): Tensor[T, shape] =
-    initTensor[T, shape](default(T))
+    result = initTensor[T, shape](0.T)
 
 func ones*[T; shape: static TensorShape](): Tensor[T, shape] =
     result = initTensor[T, shape](1.T)
@@ -87,13 +145,31 @@ proc rand*[T; shape: static TensorShape](min: T = 0.T, max: T = 1.T): Tensor[T, 
     for i in 0..<result.data.len:
         result.data[i] = rand(min..max)
 
-# Tensor functions
-func flatten*[T; shape: static TensorShape](t: Tensor[T, shape]): StridedVector[T, totalSize(shape)] =
-    ## Creates a flattened view of a tensor as a 1D vector
-    StridedVector[T, totalSize(shape)](
-        data: cast[ptr UncheckedArray[T]](addr t.data[0]),
-        stride: 1
-    )
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# DIRECT ACCESS ITERATORS
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# These allow kernels to iterate over raw data without worrying about shape.
+
+iterator items*[T; shape: static TensorShape](t: Tensor[T, shape]): T =
+    for i in 0..<totalSize(shape):
+        yield t.data[i]
+
+iterator mitems*[T; shape: static TensorShape](t: var Tensor[T, shape]): var T =
+    for i in 0..<totalSize(shape):
+        yield t.data[i]
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# UTILITIES
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+func `$`*[T; shape: static TensorShape](t: Tensor[T, shape]): string =
+    result = "Tensor["
+    result.add $shape
+    result.add "]("
+    for i, val in t.data:
+        if i > 0: result.add ", "
+        result.add $val
+    result.add ")"
 
 func copy*[T; shape: static TensorShape](t: Tensor[T, shape]): Tensor[T, shape] =
     ## Creates a deep copy of a tensor
