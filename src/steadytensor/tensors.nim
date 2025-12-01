@@ -39,7 +39,7 @@ type
 # INDEXING LOGIC
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-func flatIndex*[shape: static TensorShape](indices: varargs[int]): int {.inline.} =
+func flatIndex[shape: static TensorShape](indices: varargs[int]): int {.inline.} =
     var idx = 0
     var stride = 1
     when ColMajor:
@@ -60,47 +60,11 @@ func flatIndex*[shape: static TensorShape](indices: varargs[int]): int {.inline.
 
 func `[]`*[T; shape: static TensorShape](t: Tensor[T, shape], indices: varargs[int]): T =
     assert indices.len == shape.len, "Invalid number of indices"
-
-    var flatIndex = 0
-    var stride = 1
-
-    when ColMajor:
-        for dim in 0 .. shape.high:
-            assert indices[dim] >= 0 and indices[dim] < shape[dim], "Index out of bounds"
-            flatIndex += indices[dim] * stride
-            stride *= shape[dim]
-    else:
-        # ROW-MAJOR: Last dimension changes fastest (Right-to-Left)
-        # Ideal for: Standard Dense Deep Learning, C Interop
-        for dim in countdown(shape.high, 0):
-            assert indices[dim] >= 0 and indices[dim] < shape[dim], "Index out of bounds"
-            flatIndex += indices[dim] * stride
-            stride *= shape[dim]
-    
-    result = t.data[flatIndex]
-
-    # result = t.data[flatIndex[shape](indices)]
+    result = t.data[flatIndex[shape](indices)]
 
 func `[]=`*[T; shape: static TensorShape](t: var Tensor[T, shape], indices: varargs[int], value: T) {.inline.} =
     assert indices.len == shape.len, "Invalid number of indices"
-    
-    var flatIndex = 0
-    var stride = 1
-
-    when ColMajor:
-        for dim in 0 .. shape.high:
-            assert indices[dim] >= 0 and indices[dim] < shape[dim], "Index out of bounds"
-            flatIndex += indices[dim] * stride
-            stride *= shape[dim]
-    else:
-        for dim in countdown(shape.high, 0):
-            assert indices[dim] >= 0 and indices[dim] < shape[dim], "Index out of bounds"
-            flatIndex += indices[dim] * stride
-            stride *= shape[dim]
-
-    t.data[flatIndex] = value
-
-    # t.data[flatIndex[shape](indices)] = value
+    t.data[flatIndex[shape](indices)] = value
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # HELPERS & INITIALIZATION
