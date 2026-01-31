@@ -154,3 +154,27 @@ func zip*[T, U, V; shape: static TensorShape](
     result = initTensor[V, shape]()
     for i in 0..<t1.data.len:
         result.data[i] = f(t1.data[i], t2.data[i])
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# SHAPE MANIPULATION
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+func reshape*[T; OldShape: static TensorShape; N: static int](
+    t: Tensor[T, OldShape], 
+    newShape: static array[N, int]
+): Tensor[T, newShape] =
+    ## Reshapes a tensor at compile-time.
+    ## This is a zero-cost abstraction (memory layout is identical).
+    ## Fails at compile-time if total elements do not match.
+    
+    # 1. Compile-time check to ensure mass conservation
+    # We compare totalSize of the underlying shapes
+    static:
+        # We must explicitly cast or rely on structural equivalence for totalSize
+        # Since TensorShape is just array[rank, int], this works seamlessly.
+        assert totalSize(OldShape) == totalSize(newShape), 
+            "Reshape failed: Input size " & $totalSize(OldShape) & 
+            " does not match target size " & $totalSize(newShape)
+
+    # 2. Block copy the data (Zero-cost view in optimized builds)
+    result.data = t.data

@@ -21,6 +21,22 @@ func matmulShape*(shape1, shape2: static TensorShape[2]): static TensorShape[2] 
     
     result = [M, N]
 
+func matmulTShape*(shape1, shape2: static TensorShape[2]): static TensorShape[2] {.compileTime.} =
+    # Infers shape for C = A.T * B
+    # A: [M, K] -> A.T: [K, M]
+    # B: [M, N]
+    # Result: [K, N]
+    const 
+        M1 = shape1[0]
+        K = shape1[1]
+        M2 = shape2[0]
+        N = shape2[1]
+    
+    static:
+        assert M1 == M2, "First dimension (rows) must match for Transposed Matrix Multiplication (A.T * B)"
+    
+    result = [K, N]
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # MATRIX MULTIPLICATION (The Core Kernel)
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -97,7 +113,8 @@ func mvMul*[T; shapeW, shapeX: static TensorShape[2]](
             let xVal = x[j, 0]
             if xVal != T(0):    # Cheap check for sparsity!
                 for i in 0..<M: # Rows of W (Contiguous)
-                    result[i, 0] += W[i, j] * xVal
+                    # TODO: add operator/macro to enable writing `result[i, 0] += W[i, j] * xVal`
+                    result[i, 0] = result[i, 0] + (W[i, j] * xVal)
     else:
         # RowMajor MV Mul: Dot product of rows
         for i in 0..<M:         # Rows of W
@@ -105,6 +122,54 @@ func mvMul*[T; shapeW, shapeX: static TensorShape[2]](
             for j in 0..<K:     # Columns of W (Contiguous)
                 sum += W[i, j] * x[j, 0]
             result[i, 0] = sum
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# TRANSPOSED MATRIX MULTIPLICATION (Virtual Transpose)
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+func matmulT*[T; shapeA, shapeB: static TensorShape[2]](
+    A: Tensor[T, shapeA], 
+    B: Tensor[T, shapeB]
+): Tensor[T, matmulTShape(shapeA, shapeB)] =
+    ## High-performance Transposed Matrix Multiplication (C = A.T * B)
+    ## Crucial for Backpropagation and Predictive Coding (Error projection).
+    ## Does NOT allocate memory for a transpose; reads A virtually.
+    
+    const
+        M = shapeA[0] # Common Dimension (Rows of A and B)
+        K = shapeA[1] # Rows of Result (Cols of A)
+        N = shapeB[1] # Cols of Result (Cols of B)
+    
+    # Initialize result with zeros
+    result = zeros[T, matmulTShape(shapeA, shapeB)]()
+
+    when ColMajor:
+        # ColMajor Optimization
+        # In ColMajor, the first dimension (Rows) changes fastest.
+        # Since we sum over M (Rows of A and B), we scan both inputs linearly!
+        # This is the ideal memory layout for A.T * B.
+        
+        for j in 0..<N:            # Iterate Cols of Result/B
+            for i in 0..<K:        # Iterate Rows of Result / Cols of A
+                var sum = T(0)
+                # Inner loop scans down the columns of A and B (Contiguous)
+                for k in 0..<M:    
+                    sum += A[k, i] * B[k, j]
+                result[i, j] = sum
+    else:
+        # RowMajor Optimization (Outer Product / Rank-1 Update approach)
+        # Standard dot-product (scanning down columns) is strided/slow in RowMajor.
+        # Instead, we iterate the common dimension 'k' (Rows of A and B) first.
+        # We read Row k of A and Row k of B (both contiguous) and add their product to C.
+        
+        for k in 0..<M:            # Iterate Common Dim (Rows of A and B)
+            for i in 0..<K:        # Iterate Rows of Result / Cols of A
+                let aVal = A[k, i] # Load scalar from A (Invariant for inner loop)
+                
+                for j in 0..<N:    # Iterate Cols of Result / Cols of B
+                    # C[i, j] += A[k, i] * B[k, j]
+                    # We update the accumulator state in C
+                    result[i, j] = result[i, j] + (aVal * B[k, j])
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ELEMENT-WISE OPS (Linear Kernels)

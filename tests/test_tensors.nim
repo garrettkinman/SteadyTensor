@@ -112,3 +112,33 @@ suite "Error Handling":
             discard t[0]
         expect(AssertionDefect):
             discard t[0, 0, 0]
+
+suite "Tensor Reshaping":
+    test "Flatten 2D to 1D":
+        # 2x3 Matrix -> 6 Vector
+        let t = initTensor[float, [2, 3], 6]([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        
+        # Reshape to [6]
+        let flattened = t.reshape([6])
+        
+        check flattened.shape == [6]
+        check flattened[0] == 1.0
+        check flattened[5] == 6.0
+
+    test "Reshape 1D to 3D":
+        # 8 Vector -> 2x2x2 Cube
+        let t = initTensor[int, [8], 8]([1, 2, 3, 4, 5, 6, 7, 8])
+        
+        let cube = t.reshape([2, 2, 2])
+        
+        check cube.shape == [2, 2, 2]
+        check cube[0, 0, 0] == 1
+        check cube[1, 1, 1] == 8
+
+    test "Fail on Invalid Size (Compile-Time Check)":
+        # This code should NOT compile. 
+        # Uncommenting it should verify the static assert triggers.
+        
+        # let t = zeros[float, [2, 2]]() # Size 4
+        # let fail = t.reshape([5])      # Size 5 -> Error
+        discard
