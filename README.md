@@ -5,7 +5,7 @@
  https://opensource.org/licenses/MIT
 -->
 
-A lightweight, flexible, dependency-free tensor library that uses zero dynamic memory allocation. Intended for microcontrollers.
+An ultra-light, ultra-flexible tensor library written in pure Nim. Intended for microcontrollers.
 
 # Concept
 This library is part of the broader [SteadyNN](https://github.com/garrettkinman/SteadyNN) framework for TinyML, which is built around a few key principles:
